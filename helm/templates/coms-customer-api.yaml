@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: coms-customer-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: coms-customer-api
+  template:
+    metadata:
+      labels:
+        app: coms-customer-api
+    spec:
+      containers:
+      - name: coms-customer-api
+        image: registry.gitlab.com/jucoms/coms/coms-customer-api
+        ports:
+          - containerPort: 8080
+        env:
+          - name: spring.datasource.url
+            value: "jdbc:postgresql://postgres:5432/postgres"
+        imagePullPolicy: Always
+      imagePullSecrets:
+        - name: gitlabregcred
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: coms-customer-api
+spec:
+  selector:
+    app: coms-customer-api
+  ports:
+    - port: 8080
+      targetPort: 8080
