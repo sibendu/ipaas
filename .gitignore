@@ -1,6 +1,5 @@
-.gradle
+./gradle
 **/build
 **/bin
 **/.gradle
 **/.settings
-.project

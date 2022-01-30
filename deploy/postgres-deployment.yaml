@@ -8,6 +8,7 @@ data:
   POSTGRES_DB: postgresdb
   POSTGRES_USER: admin
   POSTGRES_PASSWORD: admin123
+  PGDATA: /var/lib/postgresql/db 
 ---
 kind: PersistentVolume
 apiVersion: v1

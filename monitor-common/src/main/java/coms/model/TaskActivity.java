@@ -30,7 +30,7 @@ public class TaskActivity implements Serializable{
 	@Id
 	@GeneratedValue(strategy=GenerationType.AUTO)
 	private Long id;
-	private String user;
+	private String userId;
 	private Date timestamp;
 	private String message;
 		
@@ -40,10 +40,10 @@ public class TaskActivity implements Serializable{
 	@JsonIgnore
     private TaskInstance taskInstance;
 
-	public TaskActivity(Long id, String user, Date timestamp, String message, TaskInstance taskInstance) {
+	public TaskActivity(Long id, String userId, Date timestamp, String message, TaskInstance taskInstance) {
 		super();
 		this.id = id;
-		this.user = user;
+		this.userId = userId;
 		this.timestamp = timestamp;
 		this.message = message;
 		this.taskInstance = taskInstance;

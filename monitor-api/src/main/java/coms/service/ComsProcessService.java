@@ -9,12 +9,14 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import coms.model.ProcessInstance;
+import coms.process.ComsAbstractEventHandler;
 import coms.process.ComsEvent;
 import coms.process.ComsEventHandlerDef;
 import coms.process.ComsProcess;
 import coms.process.ComsProcessContext;
+import coms.process.IComsEventHandler;
 import coms.process.ProcessSearchRequest;
-import coms.util.ComsUtil;
+import coms.util.ComsApiUtil;
 import coms.model.ProcessActivity;
 import coms.ComsProcessRepository;
 import coms.model.ProcessActivityRepository;
@@ -70,24 +72,12 @@ public class ComsProcessService {
 		return recordRepository.save(jobRecord);
 	}
 	
-//	public void postMessage(ComsEvent event) {
-//		System.out.println("JobService.postMessage(event)");
-//		try {
-//	        final SendMessageResult result = queue.SendQueueMessage(new Message()
-//	                .setBody(Converter.ToByteArray(event)));
-//	        System.out.println("Message posted: "+result);
-//	    } catch (Exception e) {
-//	    	System.out.println("Exception posting message: "+e.getMessage());
-//	    	e.printStackTrace();
-//	    }
-//	}
-	
 	public ProcessInstance startProcess(String processCode, ComsProcessContext context) {
 		//System.out.println("JobService.startProcess(event)");
 
 		//Create a new process instance record
 		Date dt = new Date();
-		ProcessInstance processInStance = new ProcessInstance(null, processCode, ComsUtil.PROCESS_STATUS_NEW, dt, dt);
+		ProcessInstance processInStance = new ProcessInstance(null, processCode, ComsApiUtil.PROCESS_STATUS_NEW, dt, dt);
 		processInStance = repository.save(processInStance);
 		
 		// Trigger first event to start processing
@@ -100,11 +90,24 @@ public class ComsProcessService {
 		return processInStance;
 	}
 	
-	public ProcessActivity markActivityStart(ProcessInstance currentProcessInstance, String eventCode, String handler, String description, String variables) {
-		//Create a new job record
-		ProcessActivity rec = new ProcessActivity(null,eventCode,handler, description, new Date(), null, variables, currentProcessInstance);
-		ProcessActivity rec1 = recordRepository.save(rec);
-		return rec1;
+	public ProcessActivity markActivityStart(ProcessInstance pi, ComsEvent event,ComsEventHandlerDef handler, ComsProcess processDef) {// String eventCode, String handler, String description, String variables) {
+
+		//Create a new activity record for current process instance
+		
+		String variables = event.getContext() != null ? event.getContext().serializeToString(): null;		
+		ProcessActivity act = new ProcessActivity(null,event.getCode(), handler.getHandlerClass(), handler.getName(), new Date(), null, variables, pi);		
+		
+		ProcessActivity activity = recordRepository.save(act);
+		
+		if(processDef.getStartEvent().equalsIgnoreCase(event.getCode())) {
+			//This is first event. Mark instance status as WIP
+			pi.setStatus(ComsApiUtil.PROCESS_STATUS_WIP);
+			pi = repository.save(pi);
+			System.out.println("PI updated");
+		}
+		
+		
+		return activity;
 	}
 	
 	public ProcessActivity markActivityEnd(ProcessActivity rec) {
@@ -137,7 +140,7 @@ public class ComsProcessService {
 		if(inst.getNoEndEvents() == processDef.getEndEvents().length) {
 			//This was the last end event; process instance can be marked completed
 			System.out.println("Marking process completed: process-id "+ inst.getId());
-			inst.setStatus(ComsUtil.PROCESS_STATUS_COMPLETE);
+			inst.setStatus(ComsApiUtil.PROCESS_STATUS_COMPLETE);
 		}
 		inst.setUpdated(new Date());
 		

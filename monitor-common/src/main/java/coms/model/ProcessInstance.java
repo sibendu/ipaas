@@ -42,4 +42,8 @@ public class ProcessInstance implements Serializable{
 		this.created =created;
 		this.updated =updated;
 	}	
+	
+	public void addActivity(ProcessActivity act) {
+		this.records.add(act);
+	}
 }

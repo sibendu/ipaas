@@ -1,0 +1,122 @@
+# This file is a template, and might need editing before it works on your project.
+# To contribute improvements to CI/CD templates, please follow the Development guide at:
+# https://docs.gitlab.com/ee/development/cicd/templates.html
+# This specific template is located at:
+# https://gitlab.com/gitlab-org/gitlab/-/blob/master/lib/gitlab/ci/templates/Gradle.gitlab-ci.yml
+
+# This is the Gradle build system for JVM applications
+# https://gradle.org/
+# https://github.com/gradle/gradle
+
+image: docker:20
+
+# Disable the Gradle daemon for Continuous Integration servers as correctness
+# is usually a priority over speed in CI environments. Using a fresh
+# runtime for each build is more reliable since the runtime is completely
+# isolated from any previous builds.
+variables:
+  GRADLE_OPTS: "-Dorg.gradle.daemon=false"
+  DOCKER_HOST: tcp://localhost:2375/
+  DOCKER_DRIVER: overlay2
+  APP_NAME: coms
+
+before_script:
+  - export GRADLE_USER_HOME=`pwd`/.gradle
+
+stages:
+  - build
+  - test
+  - dockerBuild
+  - deploy
+  - helm
+
+build:
+  stage: build
+  image: gradle:alpine
+  script: gradle clean build
+  cache:
+    key: "$CI_COMMIT_REF_NAME"
+    policy: push
+    paths:
+      - build
+      - .gradle
+  artifacts:
+    paths:
+      - coms-ui/build/libs/coms-ui-0.0.1-SNAPSHOT.jar
+      - coms-customer-api/build/libs/coms-customer-api-0.0.1-SNAPSHOT.jar
+  only:
+    refs:
+      - main
+    variables:
+      - $task == "ci" || $task == "all"
+
+test:
+  stage: test
+  image: gradle:alpine  
+  script: gradle test
+  cache:
+    key: "$CI_COMMIT_REF_NAME"
+    policy: pull
+    paths:
+      - build
+      - .gradle
+  only:
+    refs:
+      - main
+    variables:
+      - $task == "ci" || $task == "all"  
+
+dockerBuild:
+  stage: dockerBuild
+  image: docker:20
+  services:
+    - docker:dind  
+  before_script:
+    - docker login registry.gitlab.com -u jucoms -p jucoms@1234
+  script: 
+    - chmod +x ./buildDocker.sh
+    - ./buildDocker.sh
+  only:
+    refs:
+      - main
+    variables:
+      - $task == "ci" || $task == "all"
+
+deploy:
+  stage: deploy
+  image:
+    name: bitnami/kubectl:latest
+    entrypoint: [""]
+  script:
+    - kubectl config use-context jucoms/coms:coms-k8s
+#    - kubectl create secret docker-registry gitlabregcred --docker-server=registry.gitlab.com --docker-username=jucoms --docker-password=jucoms@1234 --docker-email=snehashish.learning@gmail.com
+    - kubectl apply -f deploy/postgres-deployment.yaml
+    - kubectl apply -f deploy/coms-customer-api.yaml
+    - kubectl apply -f deploy/coms-ui.yaml
+  only:
+    refs:
+      - main
+    variables:
+      - $task == "cd" || $task == "all"
+
+helm:
+  stage: helm
+#  image: lwolf/helm-kubectl-docker:v152_213
+  image: alpine/helm:3.2.1
+  before_script:
+#    - mkdir -p /etc/deploy
+    - kubectl config use-context jucoms/coms:coms-k8s
+#    - helm init
+#    - helm repo add stable https://kubernetes-charts.storage.googleapis.com/
+#    - helm repo add incubator https://kubernetes-charts-incubator.storage.googleapis.com/
+#    - helm repo update
+  script:
+#    - helm upgrade COMS ./helm/charts --install --values=./helm/charts/values.yaml
+    - helm install COMS ./helm/charts --values ./helm/charts/values.yaml
+#    - helm --help
+  only:
+    refs:
+      - main
+    variables:
+      - $task == "helm"
+ 

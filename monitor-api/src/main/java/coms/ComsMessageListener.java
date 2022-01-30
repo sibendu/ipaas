@@ -8,17 +8,21 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.task.TaskExecutor;
 import org.springframework.stereotype.Component;
 
+import coms.handler.ComsHumanTaskHandler;
 import coms.handler.NewEnvHandler;
 import coms.model.ProcessActivity;
 import coms.model.ProcessInstance;
+import coms.process.ComsAbstractEventHandler;
 import coms.process.ComsEvent;
 import coms.process.ComsEventHandlerDef;
+import coms.process.ComsHumanTaskDef;
 import coms.process.ComsProcess;
 import coms.process.ComsResult;
 import coms.process.IComsEventHandler;
 import coms.service.ComsMessageService;
 import coms.service.ComsProcessService;
-import coms.util.ComsUtil;
+import coms.service.TaskService;
+import coms.util.ComsApiUtil;
 import io.kubemq.sdk.event.Channel;
 import io.kubemq.sdk.queue.Queue;
 import io.kubemq.sdk.queue.Transaction;
@@ -33,6 +37,9 @@ public class ComsMessageListener {
 	
 	@Autowired
 	public ComsMessageService messageService;
+	
+	@Autowired
+	public TaskService taskService;
 	
 	private Queue queue;
 	private Channel channel;
@@ -68,10 +75,14 @@ public class ComsMessageListener {
                     	System.out.println("Event "+ eventCode+" received for Process "+processCode+ " :: process-instance "+currentProcessInstance.getId());
                     	
                     	ComsProcess processDef = ComsProcessRepository.getProcessDefinition(processCode);
-                    	                    
+                    	
+                    	if(processDef.getStartEvent().equalsIgnoreCase(eventCode)) {
+                    		//This is first event, mark process instance as started
+                    	}
+                    	
                     	//Fire handlers to process this event
                     	ComsEventHandlerDef[] handlers = processDef.getEventHandlers(event.getCode());
-                    	
+                    	                   	                    	                    	
                     	boolean handlersSuccessful = true;
                     	String success = "N";
                     	ComsResult thisHandlerResult = null;
@@ -81,16 +92,33 @@ public class ComsMessageListener {
                     		
                     		//Let all handlers do their job 
 	                    	for (int i = 0; i < handlers.length; i++) {
-	                    		ComsEventHandlerDef thisHandler = handlers[i];
-								IComsEventHandler handler = (IComsEventHandler)Class.forName(thisHandler.getHandlerClass()).getConstructor(ComsProcessService.class).newInstance(jobService);
-	
-								if(event.getContext() != null) {
-									processVars =  event.getContext().serializeToString();
-								}
-								ProcessActivity activityRecord = jobService.markActivityStart(currentProcessInstance, eventCode, thisHandler.getHandlerClass(), thisHandler.getDescription(), processVars);
 								
-								thisHandlerResult = handler.process(event);
+	                    		ComsEventHandlerDef thisHandlerDef = handlers[i];
+	                    		IComsEventHandler handler = null;
+	                    		boolean isHUmanTask = false;	                    		
+	                    		
+	                    		//Record an activity start for this process instance
+	                    		
+								ProcessActivity activityRecord = jobService.markActivityStart(currentProcessInstance, event, thisHandlerDef, processDef);
 								
+								//Now start the actual activity
+	                    		if(thisHandlerDef instanceof ComsHumanTaskDef) {
+	                        		//It is a human task in te process. The handler will create a task record and exit. 
+	                    			//Then engine should wait for user to act on that. 
+	                    			// Process activity for current step should not be marked completed and Next events should not be fired immediately
+	                    			// These should happen automatically when the task gets completed 
+	                    			isHUmanTask = true;
+	                    			
+	                    			ComsHumanTaskHandler humanTaskHandler = new ComsHumanTaskHandler(jobService, taskService);
+	                    			
+	                    			thisHandlerResult = humanTaskHandler.process(event, activityRecord.getId(), (ComsHumanTaskDef)thisHandlerDef);
+	                        	}else {
+	                        		//This is an automatic procss activity
+	                        		handler = (IComsEventHandler)Class.forName(thisHandlerDef.getHandlerClass()).getConstructor(ComsProcessService.class).newInstance(jobService);		                    		
+	                        		
+	                        		thisHandlerResult = handler.process(event);
+	                        	}	                    	
+																
 								success = "N";
 								if(thisHandlerResult.isSuccess()) {
 									success = "Y";
@@ -98,26 +126,34 @@ public class ComsMessageListener {
 									handlersSuccessful = false; // At least one handler for current event did not finish successfully
 								}
 								
-								//Update process activity with the outcome of processing for this handler
-								activityRecord.setSuccess(success);
-								activityRecord.setMessage(thisHandlerResult.getResult());
-								
-								if(event.getContext() != null) {
-									activityRecord.setVariables( event.getContext().serializeToString());
+								if(!isHUmanTask) {
+									
+									// It is an Automatic process activity. Mark activity completed. 									
+									
+									activityRecord.setSuccess(success);
+									activityRecord.setMessage(thisHandlerResult.getResult());
+									
+									if(event.getContext() != null) {
+										activityRecord.setVariables( event.getContext().serializeToString());
+									}
+									
+									activityRecord = jobService.markActivityEnd(activityRecord);
+									
+									
+									//Fire next set of events for this handler, if defined
+		                    		String[] nextEventsFromHandler = thisHandlerDef.getNextEvents();
+		                    		if(nextEventsFromHandler != null) {                    			                    	
+			                        	for (int k = 0; k < nextEventsFromHandler.length; k++) {
+			    							String nextHandlerEvent = nextEventsFromHandler[k];    							
+			    							ComsEvent eve = new ComsEvent(nextHandlerEvent, new Date(), event.getProcessId(), event.getContext());
+			    							messageService.sendMessage(eve);
+			    						}
+		    				    		//System.out.println("Next events triggered : "+ nextEvents.toString());
+		                    		}
+	                    		
+								}else {
+									System.out.println("Human task created, activity is open and handler level events kept on hold");
 								}
-								
-								activityRecord = jobService.markActivityEnd(activityRecord);
-								
-								//Fire next set of events for this handler, if defined
-	                    		String[] nextEventsFromHandler = thisHandler.getNextEvents();
-	                    		if(nextEventsFromHandler != null) {                    			                    	
-		                        	for (int k = 0; k < nextEventsFromHandler.length; k++) {
-		    							String nextHandlerEvent = nextEventsFromHandler[k];    							
-		    							ComsEvent eve = new ComsEvent(nextHandlerEvent, new Date(), event.getProcessId(), event.getContext());
-		    							messageService.sendMessage(eve);
-		    						}
-	    				    		//System.out.println("Next events triggered : "+ nextEvents.toString());
-	                    		}
 							}
 	                    	
 	                    	String[] nextEvents = processDef.getNextEvents(event.getCode());

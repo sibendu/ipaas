@@ -9,8 +9,10 @@ public interface TaskInstanceRepository extends CrudRepository<TaskInstance, Lon
 
 	TaskInstance findById(long id);
 	
-	TaskInstance findByAssignedUser(String user);
+	List<TaskInstance> findByAssignedUser(String user);
 
-	TaskInstance findByAssignedGroup(String group);
+	List<TaskInstance> findByAssignedGroup(String group);
+
+	List<TaskInstance> findByAssignedUserAndStatus(String user, String status);
 
 }
